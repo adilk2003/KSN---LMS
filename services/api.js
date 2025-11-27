@@ -1,8 +1,14 @@
 
 import { MOCK_COURSES, MOCK_LIVE_CLASSES, MOCK_RECORDINGS } from '../constants.js';
 
+// If VITE_API_URL is set (Production), use it. Otherwise use localhost (Development).
+// Note: We append '/api' because the backend routes start with /api
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = `${BASE_URL}/api`;
+
+// ENABLE MOCK MODE BY DEFAULT
+// This ensures the app works immediately in preview or if backend is down.
 const MOCK_MODE = true; 
-const API_URL = 'http://localhost:5000/api';
 
 // Helper to simulate network delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -23,67 +29,119 @@ if (!localStorage.getItem('ksn_recordings')) {
     localStorage.setItem('ksn_recordings', JSON.stringify(MOCK_RECORDINGS));
 }
 
+// Helper to fetch from backend with fallback to mock
+const fetchAPI = async (endpoint, options = {}) => {
+    try {
+        const headers = { 
+            'Content-Type': 'application/json', 
+            ...getAuthHeader(),
+            ...options.headers 
+        };
+        
+        const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+        if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
+        return await res.json();
+    } catch (error) {
+        console.warn(`Backend connection failed (${endpoint}), falling back to mock/local data.`, error);
+        throw error; // Let the caller handle fallback or error
+    }
+};
+
 export const api = {
   auth: {
     login: async (email, password) => {
-      if (MOCK_MODE) {
-        await delay(800);
-        const users = JSON.parse(localStorage.getItem('ksn_users') || '[]');
-        
-        // --- ADMIN CREDENTIALS ---
-        if (email === 'admin@ksn.com' && password === 'admin') {
-           const adminUser = {
-             id: 'admin-1',
-             name: 'System Admin',
-             email: 'admin@ksn.com',
-             role: 'admin',
-             plan: 'enterprise',
-             avatar: 'https://picsum.photos/100/100?random=admin'
-           };
-           localStorage.setItem('ksn_session', JSON.stringify(adminUser));
-           return { user: adminUser, token: 'mock-admin-token' };
-        }
-
-        const user = users.find(u => u.email === email && u.password === password);
-        
-        if (user) {
-          localStorage.setItem('ksn_session', JSON.stringify(user));
-          return { user, token: 'mock-jwt-token' };
-        }
-        
-        // Default mock student
-        if (email === 'student@ksn.com' && password === 'password') {
-          const mockUser = { 
-            id: 'default', 
-            name: 'Alex K.', 
-            email, 
-            role: 'student',
-            plan: 'free',
-            bio: 'Passionate learner exploring AI and Design.',
-            preferences: {
-              language: 'English',
-              darkMode: true
-            }
-          };
-          localStorage.setItem('ksn_session', JSON.stringify(mockUser));
-          return { user: mockUser, token: 'mock-jwt-token' };
-        }
-
-        throw new Error('Invalid credentials');
+      if (!MOCK_MODE) {
+          try {
+              const res = await fetch(`${API_URL}/auth/login`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email, password })
+              });
+              const data = await res.json();
+              if(res.ok) {
+                  localStorage.setItem('ksn_session', JSON.stringify(data.user));
+                  return data;
+              }
+              throw new Error(data.message);
+          } catch(e) {
+              // Fallthrough to mock if server is down
+              console.log("Server unreachable, trying mock login...");
+          }
       }
+
+      // --- MOCK FALLBACK ---
+      await delay(800);
+      const users = JSON.parse(localStorage.getItem('ksn_users') || '[]');
+      
+      // --- ADMIN CREDENTIALS ---
+      if (email === 'admin@ksn.com' && password === 'admin') {
+         const adminUser = {
+           id: 'admin-1',
+           name: 'System Admin',
+           email: 'admin@ksn.com',
+           role: 'admin',
+           plan: 'enterprise',
+           avatar: 'https://picsum.photos/100/100?random=admin'
+         };
+         localStorage.setItem('ksn_session', JSON.stringify(adminUser));
+         return { user: adminUser, token: 'mock-admin-token' };
+      }
+
+      const user = users.find(u => u.email === email && u.password === password);
+      
+      if (user) {
+        localStorage.setItem('ksn_session', JSON.stringify(user));
+        return { user, token: 'mock-jwt-token' };
+      }
+      
+      // Default mock student
+      if (email === 'student@ksn.com' && password === 'password') {
+        const mockUser = { 
+          id: 'default', 
+          name: 'Alex K.', 
+          email, 
+          role: 'student',
+          plan: 'free',
+          bio: 'Passionate learner exploring AI and Design.',
+          preferences: {
+            language: 'English',
+            darkMode: true
+          }
+        };
+        localStorage.setItem('ksn_session', JSON.stringify(mockUser));
+        return { user: mockUser, token: 'mock-jwt-token' };
+      }
+
+      throw new Error('Invalid credentials');
     },
     
     register: async (userData) => {
-      await delay(800);
-      const users = JSON.parse(localStorage.getItem('ksn_users') || '[]');
-      if (users.find(u => u.email === userData.email)) {
-        throw new Error('User already exists');
-      }
-      const newUser = { ...userData, id: Date.now().toString(), role: 'student', plan: 'free', bio: 'New Student' };
-      users.push(newUser);
-      localStorage.setItem('ksn_users', JSON.stringify(users));
-      localStorage.setItem('ksn_session', JSON.stringify(newUser));
-      return { user: newUser, token: 'mock-jwt-token' };
+        if (!MOCK_MODE) {
+            try {
+                const res = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(userData)
+                });
+                const data = await res.json();
+                if(res.ok) {
+                    localStorage.setItem('ksn_session', JSON.stringify(data.user));
+                    return data;
+                }
+            } catch(e) {}
+        }
+        
+        // Mock Register
+        await delay(800);
+        const users = JSON.parse(localStorage.getItem('ksn_users') || '[]');
+        if (users.find(u => u.email === userData.email)) {
+            throw new Error('User already exists');
+        }
+        const newUser = { ...userData, id: Date.now().toString(), role: 'student', plan: 'free', bio: 'New Student' };
+        users.push(newUser);
+        localStorage.setItem('ksn_users', JSON.stringify(users));
+        localStorage.setItem('ksn_session', JSON.stringify(newUser));
+        return { user: newUser, token: 'mock-jwt-token' };
     },
 
     getCurrentUser: () => {
@@ -97,10 +155,16 @@ export const api = {
 
   data: {
     getCourses: async () => {
+        if(!MOCK_MODE) {
+            try { return await fetchAPI('/courses'); } catch(e) {}
+        }
         await delay(400);
         return JSON.parse(localStorage.getItem('ksn_courses'));
     },
     getAssignments: async () => {
+        if(!MOCK_MODE) {
+             try { return await fetchAPI('/assignments'); } catch(e) {}
+        }
         await delay(600);
         return [
             { id: 1, title: 'AI Ethics Essay', course: 'Advanced AI Architectures', dueDate: '2023-12-25', status: 'Pending', type: 'Essay', link: 'https://docs.google.com/forms/u/0/' },
@@ -110,6 +174,9 @@ export const api = {
         ];
     },
     getGrades: async () => {
+        if(!MOCK_MODE) {
+             try { return await fetchAPI('/grades'); } catch(e) {}
+        }
         await delay(500);
         return [
             { id: 1, course: 'Quantum Computing', assessment: 'Mid-Term', score: 88, maxScore: 100, date: '2023-10-15' },
@@ -117,6 +184,9 @@ export const api = {
         ];
     },
     getAttendance: async () => {
+        if(!MOCK_MODE) {
+             try { return await fetchAPI('/attendance'); } catch(e) {}
+        }
         await delay(400);
         const days = [];
         const today = new Date();
@@ -125,6 +195,18 @@ export const api = {
             days.push({ date: new Date(today.getFullYear(), today.getMonth(), i), status });
         }
         return days;
+    },
+    getMessages: async () => {
+        if(!MOCK_MODE) {
+             try { return await fetchAPI('/messages'); } catch(e) {}
+        }
+        return [];
+    },
+    sendMessage: async (text, chatId) => {
+        if(!MOCK_MODE) {
+             try { return await fetchAPI('/messages', { method: 'POST', body: JSON.stringify({text, chatId}) }); } catch(e) {}
+        }
+        return {};
     }
   },
 
@@ -150,11 +232,9 @@ export const api = {
           await delay(500);
           return JSON.parse(localStorage.getItem('ksn_recordings'));
       },
-      // Attendance Tracking for Live Classes
       markLiveAttendance: async (classId, durationMinutes) => {
           console.log(`📡 Marking attendance: Class ${classId}, Duration: ${durationMinutes.toFixed(2)} mins`);
           if (durationMinutes >= 30) { 
-              // In real app, this would update the database
               console.log("✅ Attendance Marked: PRESENT (User stayed > 30 mins)");
               return { status: 'marked', message: 'Attendance recorded successfully' };
           } else {
@@ -212,7 +292,6 @@ export const api = {
         await delay(800);
         return { success: true };
     },
-    // Course CRUD
     addCourse: async (courseData) => {
         await delay(600);
         const courses = JSON.parse(localStorage.getItem('ksn_courses') || '[]');
